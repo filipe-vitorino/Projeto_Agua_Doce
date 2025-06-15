@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 // Importando as páginas
 import 'pages/scanner_ble_page.dart';
 import 'pages/scanner_wifi_page.dart';
 import 'pages/ver_dados_page.dart';
 import 'pages/graficos_page.dart';
+import 'package:pad_scanner/viewmodels/ble_connection_viewmodel.dart';
 
 void main() {
-  runApp(MyApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => BleConnectionViewModel(),
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
