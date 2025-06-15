@@ -1,82 +1,62 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class ScannerBluetoothPage extends StatefulWidget {
-  const ScannerBluetoothPage({super.key});
+class ScannerBlePage extends StatefulWidget {
+  const ScannerBlePage({super.key});
 
   @override
-  State<ScannerBluetoothPage> createState() => _ScannerBluetoothPageState();
+  State<ScannerBlePage> createState() => _ScannerBlePageState();
 }
 
-class _ScannerBluetoothPageState extends State<ScannerBluetoothPage> {
-  final _ble = FlutterReactiveBle();
-  List<DiscoveredDevice> _devices = [];
-  bool _scanning = false;
-  DiscoveredDevice? _selectedDevice;
+class _ScannerBlePageState extends State<ScannerBlePage> {
+  List<ScanResult> _devices = [];
+  String? _selectedDeviceName;
+  String? _selectedDeviceId;
+  bool _isScanning = false;
 
   @override
   void initState() {
     super.initState();
-    _requestPermissions();
+    _requestPermissionsAndScan();
   }
 
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.location,
-    ].request();
-  }
+  Future<void> _requestPermissionsAndScan() async {
+    await Permission.bluetoothScan.request();
+    await Permission.location.request(); // Necessário no Android
 
-  void _startScan() {
     setState(() {
+      _isScanning = true;
       _devices.clear();
-      _scanning = true;
     });
 
-    _ble
-        .scanForDevices(withServices: [])
-        .listen(
-          (device) {
-            if (!_devices.any((d) => d.id == device.id)) {
-              setState(() {
-                _devices.add(device);
-              });
-            }
-          },
-          onError: (error) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Erro ao escanear: $error')));
-            setState(() {
-              _scanning = false;
-            });
-          },
-        );
-
-    // Para o scan automaticamente após 10 segundos
-    Future.delayed(const Duration(seconds: 10), () {
-      _ble.deinitialize();
+    FlutterBluePlus.scanResults.listen((results) {
       setState(() {
-        _scanning = false;
+        _devices = results;
       });
     });
+
+    FlutterBluePlus.isScanning.listen((scanning) {
+      setState(() {
+        _isScanning = scanning;
+      });
+    });
+
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
   }
 
   Future<void> _showDeviceListDialog() async {
     if (_devices.isEmpty) {
-      _startScan();
-      await Future.delayed(const Duration(seconds: 2));
+      await _requestPermissionsAndScan();
       if (_devices.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nenhum dispositivo encontrado')),
+          const SnackBar(content: Text('Nenhum dispositivo BLE encontrado')),
         );
         return;
       }
     }
 
-    final selected = await showDialog<DiscoveredDevice>(
+    final selection = await showDialog<Map<String, String>>(
       context: context,
       builder: (context) {
         return Dialog(
@@ -86,7 +66,6 @@ class _ScannerBluetoothPageState extends State<ScannerBluetoothPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Cabeçalho colorido
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -98,7 +77,7 @@ class _ScannerBluetoothPageState extends State<ScannerBluetoothPage> {
                   ),
                 ),
                 child: const Text(
-                  'Dispositivos Bluetooth',
+                  'Dispositivos BLE disponíveis',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -106,26 +85,30 @@ class _ScannerBluetoothPageState extends State<ScannerBluetoothPage> {
                   ),
                 ),
               ),
-
-              // Lista de dispositivos
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: _devices.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    final device = _devices[index];
+                    final device = _devices[index].device;
                     final name =
-                        device.name.isNotEmpty ? device.name : '(Desconhecido)';
+                        device.platformName.isNotEmpty
+                            ? device.platformName
+                            : '(Sem nome)';
                     return ListTile(
                       leading: const Icon(Icons.bluetooth, color: Colors.blue),
                       title: Text(name),
-                      subtitle: Text(device.id),
+                      subtitle: Text(device.remoteId.str),
                       trailing: const Icon(
                         Icons.keyboard_arrow_right,
                         color: Colors.grey,
                       ),
-                      onTap: () => Navigator.pop(context, device),
+                      onTap:
+                          () => Navigator.pop(context, {
+                            "name": name,
+                            "id": device.remoteId.str,
+                          }),
                     );
                   },
                 ),
@@ -137,31 +120,119 @@ class _ScannerBluetoothPageState extends State<ScannerBluetoothPage> {
       },
     );
 
-    if (selected != null) {
+    if (selection != null) {
       setState(() {
-        _selectedDevice = selected;
+        _selectedDeviceName = selection["name"];
+        _selectedDeviceId = selection["id"];
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Selecionado: ${selected.name.isNotEmpty ? selected.name : selected.id}',
-          ),
-        ),
-      );
-
-      // Aqui você pode implementar conexão, troca de dados, etc.
+      _showDeviceDialog();
     }
+  }
+
+  Future<void> _showDeviceDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  ),
+                ),
+                child: Text(
+                  'Conectar em $_selectedDeviceName',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    const Text(
+                      "ID do dispositivo:",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _selectedDeviceId ?? '',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+              ButtonBar(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancelar'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _connectToDevice(_selectedDeviceId!);
+                    },
+                    child: const Text('Conectar'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _connectToDevice(String deviceId) async {
+    final device =
+        _devices.firstWhere((r) => r.device.remoteId.str == deviceId).device;
+    bool success = false;
+    try {
+      await device.connect(timeout: const Duration(seconds: 10));
+      success = true;
+    } catch (e) {
+      success = false;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? 'Conectado com sucesso a $_selectedDeviceName'
+              : 'Falha ao conectar a $_selectedDeviceName',
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    FlutterBluePlus.stopScan();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Conectar Bluetooth')),
+      appBar: AppBar(title: const Text('Conectar BLE')),
       body: Center(
         child: ElevatedButton(
           onPressed: _showDeviceListDialog,
-          child: const Text('Escolher Dispositivo Bluetooth'),
+          child: const Text('Escolher Dispositivo BLE'),
         ),
       ),
     );

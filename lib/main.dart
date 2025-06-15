@@ -27,7 +27,7 @@ class MainMenuPage extends StatelessWidget {
       'Scanner Bluetooth',
       Icons.bluetooth,
       Colors.blue,
-      ScannerBluetoothPage(),
+      ScannerBlePage(),
     ),
     _MenuItem('Scanner WiFi', Icons.wifi, Colors.orange, ScannerWifiPage()),
     _MenuItem('Ver Dados', Icons.storage, Colors.green, VerDadosPage()),
